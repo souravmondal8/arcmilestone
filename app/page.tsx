@@ -233,8 +233,7 @@ function ClientView({
 
       const totalAmount = parseUnits(formData.totalAmount, 6);
       const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
-
+      const contractWithSigner = contract.connect(signer) as any;
       const tx = await contractWithSigner.createProject(
         formData.freelancerAddress,
         totalAmount
@@ -278,7 +277,7 @@ function ClientView({
       setSuccess(null);
 
       const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
+      const contractWithSigner = contract.connect(signer) as any;
 
       const tx = await contractWithSigner.releaseMilestone(
         formData.projectIdToRelease,
@@ -552,7 +551,7 @@ function FreelancerView({
       setSuccess(null);
 
       const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer);
+      const contractWithSigner = contract.connect(signer) as any;
 
       const tx = await contractWithSigner.cancelProject(formData.projectIdToCancel);
 
