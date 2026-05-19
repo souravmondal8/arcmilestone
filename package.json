@@ -12,5 +12,10 @@
     "react": "latest",
     "react-dom": "latest",
     "ethers": "^6.11.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0"
   }
 }
