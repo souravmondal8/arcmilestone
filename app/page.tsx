@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { BrowserProvider } from 'ethers';
 import { ethers, Contract, formatUnits, parseUnits } from 'ethers';
+import { Wallet, Shield, CheckCircle2, XCircle, FileText, ArrowRight, Layers, AlertCircle } from 'lucide-react';
 
 // ============================================================================
 // CONSTANTS & TYPES
 // ============================================================================
 
-const ARC_TESTNET_CHAIN_ID = 1329;
+const ARC_TESTNET_CHAIN_ID = 5042002;
 const CONTRACT_ADDRESS = '0x562c5b127d7B378BbDB3fA1168BD6775Ba5f29d6';
 
 interface Project {
@@ -24,9 +25,6 @@ interface Project {
 interface FormState {
   freelancerAddress: string;
   totalAmount: string;
-  milestone1: string;
-  milestone2: string;
-  milestone3: string;
   projectIdToCancel: string;
   projectIdToRelease: string;
   milestoneIndexToRelease: string;
@@ -77,9 +75,9 @@ const CONTRACT_ABI = [
               { internalType: 'uint256', name: 'amount', type: 'uint256' },
               { internalType: 'bool', name: 'released', type: 'bool' }
             ],
-            internalType: 'struct ArcMilestone.Milestone[3]',
+            internalType: 'struct ArcMilestone.Milestone',
             name: 'milestones',
-            type: 'tuple[3]'
+            type: 'tuple'
           }
         ],
         internalType: 'struct ArcMilestone.Project',
@@ -100,616 +98,7 @@ const CONTRACT_ABI = [
 ] as const;
 
 // ============================================================================
-// NAVBAR COMPONENT
-// ============================================================================
-
-function Navbar({
-  isConnected,
-  walletAddress,
-  onConnect,
-  onDisconnect
-}: {
-  isConnected: boolean;
-  walletAddress: string | null;
-  onConnect: () => void;
-  onDisconnect: () => void;
-}) {
-  return (
-    <nav className="border-b border-slate-200 bg-white shadow-sm">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-2">
-          <div className="text-2xl font-bold text-blue-600">⚡</div>
-          <h1 className="text-xl font-bold text-slate-900">ArcMilestone</h1>
-        </div>
-        {isConnected && walletAddress ? (
-          <div className="flex items-center gap-4">
-            <div className="rounded-lg bg-blue-50 px-4 py-2 font-mono text-sm text-blue-700">
-              {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-            </div>
-            <button
-              onClick={onDisconnect}
-              className="rounded-lg bg-red-100 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-200"
-            >
-              Disconnect
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={onConnect}
-            className="rounded-lg bg-blue-600 px-6 py-2 font-semibold text-white transition hover:bg-blue-700"
-          >
-            Connect Wallet
-          </button>
-        )}
-      </div>
-    </nav>
-  );
-}
-
-// ============================================================================
-// CLIENT VIEW COMPONENT
-// ============================================================================
-
-function ClientView({
-  walletAddress,
-  provider,
-  contract
-}: {
-  walletAddress: string;
-  provider: BrowserProvider | null;
-  contract: Contract | null;
-}) {
-  const [formData, setFormData] = useState<FormState>({
-    freelancerAddress: '',
-    totalAmount: '',
-    milestone1: '',
-    milestone2: '',
-    milestone3: '',
-    projectIdToCancel: '',
-    projectIdToRelease: '',
-    milestoneIndexToRelease: ''
-  });
-
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const fetchProjects = useCallback(async () => {
-    if (!contract) return;
-    try {
-      const totalProjects = await contract.getTotalProjects();
-      const projectList: Project[] = [];
-
-      for (let i = 0; i < Number(totalProjects); i++) {
-        const projectData = await contract.getProject(i);
-        const [client, freelancer, , totalAmount, releasedAmount, cancelled, milestones] =
-          projectData;
-
-        projectList.push({
-          id: i,
-          client: client as string,
-          freelancer: freelancer as string,
-          totalAmount: formatUnits(totalAmount as bigint, 6),
-          releasedAmount: formatUnits(releasedAmount as bigint, 6),
-          cancelled: cancelled as boolean,
-          milestones: (milestones as Array<{ amount: bigint; released: boolean }>).map(
-            (m) => ({
-              amount: formatUnits(m.amount, 6),
-              released: m.released
-            })
-          )
-        });
-      }
-
-      setProjects(projectList);
-    } catch (err) {
-      console.error('Error fetching projects:', err);
-      setError('Failed to fetch projects');
-    }
-  }, [contract]);
-
-  useEffect(() => {
-    fetchProjects();
-    const interval = setInterval(fetchProjects, 10000);
-    return () => clearInterval(interval);
-  }, [fetchProjects]);
-
-  const handleCreateProject = async () => {
-    if (!contract || !provider) {
-      setError('Contract or provider not initialized');
-      return;
-    }
-
-    if (!formData.freelancerAddress || !formData.totalAmount) {
-      setError('Please fill in all required fields');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-
-      const totalAmount = parseUnits(formData.totalAmount, 6);
-      const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer) as any;
-      const tx = await contractWithSigner.createProject(
-        formData.freelancerAddress,
-        totalAmount
-      );
-
-      setSuccess('Transaction submitted! Waiting for confirmation...');
-      await tx.wait();
-
-      setSuccess('Project created successfully!');
-      setFormData({
-        ...formData,
-        freelancerAddress: '',
-        totalAmount: '',
-        milestone1: '',
-        milestone2: '',
-        milestone3: ''
-      });
-
-      setTimeout(() => fetchProjects(), 1000);
-    } catch (err: any) {
-      setError(err?.message || 'Transaction failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReleaseMilestone = async () => {
-    if (!contract || !provider) {
-      setError('Contract or provider not initialized');
-      return;
-    }
-
-    if (!formData.projectIdToRelease || formData.milestoneIndexToRelease === '') {
-      setError('Please enter project ID and milestone index');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-
-      const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer) as any;
-
-      const tx = await contractWithSigner.releaseMilestone(
-        formData.projectIdToRelease,
-        formData.milestoneIndexToRelease
-      );
-
-      setSuccess('Milestone release transaction submitted!');
-      await tx.wait();
-
-      setSuccess('Milestone released successfully!');
-      setFormData({
-        ...formData,
-        projectIdToRelease: '',
-        milestoneIndexToRelease: ''
-      });
-
-      setTimeout(() => fetchProjects(), 1000);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to release milestone');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-8">
-      {/* Create Project Section */}
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="mb-6 text-2xl font-bold text-slate-900">Create New Project</h2>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700">
-              Freelancer Address
-            </label>
-            <input
-              type="text"
-              placeholder="0x..."
-              value={formData.freelancerAddress}
-              onChange={(e) =>
-                setFormData({ ...formData, freelancerAddress: e.target.value })
-              }
-              className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700">
-              Total Amount (USDC)
-            </label>
-            <input
-              type="number"
-              placeholder="1000"
-              step="0.01"
-              value={formData.totalAmount}
-              onChange={(e) =>
-                setFormData({ ...formData, totalAmount: e.target.value })
-              }
-              className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </div>
-
-          <button
-            onClick={handleCreateProject}
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition disabled:bg-slate-400 hover:bg-blue-700"
-          >
-            {loading ? 'Processing...' : 'Initialize Secure Vault'}
-          </button>
-
-          {error && <div className="rounded-lg bg-red-100 p-4 text-red-700">{error}</div>}
-          {success && <div className="rounded-lg bg-green-100 p-4 text-green-700">{success}</div>}
-        </div>
-      </div>
-
-      {/* Release Milestone Section */}
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="mb-6 text-2xl font-bold text-slate-900">Release Milestone</h2>
-
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700">
-                Project ID
-              </label>
-              <input
-                type="number"
-                placeholder="0"
-                value={formData.projectIdToRelease}
-                onChange={(e) =>
-                  setFormData({ ...formData, projectIdToRelease: e.target.value })
-                }
-                className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700">
-                Milestone Index (0-2)
-              </label>
-              <input
-                type="number"
-                placeholder="0"
-                min="0"
-                max="2"
-                value={formData.milestoneIndexToRelease}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    milestoneIndexToRelease: e.target.value
-                  })
-                }
-                className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handleReleaseMilestone}
-            disabled={loading}
-            className="w-full rounded-lg bg-green-600 px-6 py-3 font-semibold text-white transition disabled:bg-slate-400 hover:bg-green-700"
-          >
-            {loading ? 'Processing...' : 'Release Milestone'}
-          </button>
-        </div>
-      </div>
-
-      {/* Active Projects */}
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="mb-6 text-2xl font-bold text-slate-900">Active Projects</h2>
-
-        {projects.length === 0 ? (
-          <p className="text-slate-600">No projects yet.</p>
-        ) : (
-          <div className="space-y-4">
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">Project #{project.id}</h3>
-                  {project.cancelled && (
-                    <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
-                      Cancelled
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm text-slate-600">
-                  <div>
-                    <span className="font-semibold">Client:</span>{' '}
-                    {project.client.slice(0, 6)}...{project.client.slice(-4)}
-                  </div>
-                  <div>
-                    <span className="font-semibold">Freelancer:</span>{' '}
-                    {project.freelancer.slice(0, 6)}...{project.freelancer.slice(-4)}
-                  </div>
-                  <div>
-                    <span className="font-semibold">Total:</span> ${project.totalAmount}
-                  </div>
-                  <div>
-                    <span className="font-semibold">Released:</span> ${project.releasedAmount}
-                  </div>
-                </div>
-                <div className="mt-3 space-y-1">
-                  {project.milestones.map((m, idx) => (
-                    <div key={idx} className="text-xs text-slate-600">
-                      Milestone {idx + 1}: ${m.amount}{' '}
-                      {m.released ? (
-                        <span className="font-semibold text-green-600">✓ Released</span>
-                      ) : (
-                        <span className="text-slate-400">Pending</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// FREELANCER VIEW COMPONENT
-// ============================================================================
-
-function FreelancerView({
-  walletAddress,
-  provider,
-  contract
-}: {
-  walletAddress: string;
-  provider: BrowserProvider | null;
-  contract: Contract | null;
-}) {
-  const [formData, setFormData] = useState<FormState>({
-    freelancerAddress: '',
-    totalAmount: '',
-    milestone1: '',
-    milestone2: '',
-    milestone3: '',
-    projectIdToCancel: '',
-    projectIdToRelease: '',
-    milestoneIndexToRelease: ''
-  });
-
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const fetchProjects = useCallback(async () => {
-    if (!contract) return;
-    try {
-      const totalProjects = await contract.getTotalProjects();
-      const projectList: Project[] = [];
-
-      for (let i = 0; i < Number(totalProjects); i++) {
-        const projectData = await contract.getProject(i);
-        const [client, freelancer, , totalAmount, releasedAmount, cancelled, milestones] =
-          projectData;
-
-        if ((freelancer as string).toLowerCase() === walletAddress.toLowerCase()) {
-          projectList.push({
-            id: i,
-            client: client as string,
-            freelancer: freelancer as string,
-            totalAmount: formatUnits(totalAmount as bigint, 6),
-            releasedAmount: formatUnits(releasedAmount as bigint, 6),
-            cancelled: cancelled as boolean,
-            milestones: (milestones as Array<{ amount: bigint; released: boolean }>).map(
-              (m) => ({
-                amount: formatUnits(m.amount, 6),
-                released: m.released
-              })
-            )
-          });
-        }
-      }
-
-      setProjects(projectList);
-    } catch (err) {
-      console.error('Error fetching projects:', err);
-      setError('Failed to fetch projects');
-    }
-  }, [contract, walletAddress]);
-
-  useEffect(() => {
-    fetchProjects();
-    const interval = setInterval(fetchProjects, 10000);
-    return () => clearInterval(interval);
-  }, [fetchProjects]);
-
-  const handleCancelProject = async () => {
-    if (!contract || !provider) {
-      setError('Contract or provider not initialized');
-      return;
-    }
-
-    if (!formData.projectIdToCancel) {
-      setError('Please enter project ID');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-
-      const signer = await provider.getSigner();
-      const contractWithSigner = contract.connect(signer) as any;
-
-      const tx = await contractWithSigner.cancelProject(formData.projectIdToCancel);
-
-      setSuccess('Cancel transaction submitted!');
-      await tx.wait();
-
-      setSuccess('Project cancelled successfully!');
-      setFormData({ ...formData, projectIdToCancel: '' });
-
-      setTimeout(() => fetchProjects(), 1000);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to cancel project');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-8">
-      {/* Cancel Project Section */}
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="mb-6 text-2xl font-bold text-slate-900">Manage Projects</h2>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700">
-              Project ID to Cancel
-            </label>
-            <input
-              type="number"
-              placeholder="0"
-              value={formData.projectIdToCancel}
-              onChange={(e) =>
-                setFormData({ ...formData, projectIdToCancel: e.target.value })
-              }
-              className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-          </div>
-
-          <button
-            onClick={handleCancelProject}
-            disabled={loading}
-            className="w-full rounded-lg bg-red-600 px-6 py-3 font-semibold text-white transition disabled:bg-slate-400 hover:bg-red-700"
-          >
-            {loading ? 'Processing...' : 'Cancel Project'}
-          </button>
-
-          {error && <div className="rounded-lg bg-red-100 p-4 text-red-700">{error}</div>}
-          {success && <div className="rounded-lg bg-green-100 p-4 text-green-700">{success}</div>}
-        </div>
-      </div>
-
-      {/* Your Projects */}
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="mb-6 text-2xl font-bold text-slate-900">Your Projects</h2>
-
-        {projects.length === 0 ? (
-          <p className="text-slate-600">No projects assigned to you yet.</p>
-        ) : (
-          <div className="space-y-4">
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">Project #{project.id}</h3>
-                  {project.cancelled && (
-                    <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
-                      Cancelled
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm text-slate-600">
-                  <div>
-                    <span className="font-semibold">Client:</span>{' '}
-                    {project.client.slice(0, 6)}...{project.client.slice(-4)}
-                  </div>
-                  <div>
-                    <span className="font-semibold">Total:</span> ${project.totalAmount}
-                  </div>
-                  <div>
-                    <span className="font-semibold">Released:</span> ${project.releasedAmount}
-                  </div>
-                </div>
-                <div className="mt-3 space-y-1">
-                  {project.milestones.map((m, idx) => (
-                    <div key={idx} className="text-xs text-slate-600">
-                      Milestone {idx + 1}: ${m.amount}{' '}
-                      {m.released ? (
-                        <span className="font-semibold text-green-600">✓ Released</span>
-                      ) : (
-                        <span className="text-slate-400">Pending</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// WEB3 CONNECTION UTILITY
-// ============================================================================
-
-async function connectWallet(): Promise<{
-  address: string;
-  provider: BrowserProvider;
-} | null> {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const ethereum = (window as any).ethereum;
-    if (!ethereum) {
-      throw new Error('No wallet extension found. Please install MetaMask.');
-    }
-
-    const accounts = (await ethereum.request({
-      method: 'eth_requestAccounts'
-    })) as string[];
-
-    if (!accounts || accounts.length === 0) {
-      throw new Error('No accounts found');
-    }
-
-    const provider = new ethers.BrowserProvider(ethereum);
-    const network = await provider.getNetwork();
-
-    if (Number(network.chainId) !== ARC_TESTNET_CHAIN_ID) {
-      try {
-        await ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: `0x${ARC_TESTNET_CHAIN_ID.toString(16)}` }]
-        });
-      } catch (switchError: any) {
-        if (switchError.code === 4902) {
-          throw new Error('Arc Testnet not configured. Please add it to MetaMask manually.');
-        }
-        throw switchError;
-      }
-    }
-
-    return {
-      address: accounts[0],
-      provider
-    };
-  } catch (error: any) {
-    throw new Error(error?.message || 'Failed to connect wallet');
-  }
-}
-
-// ============================================================================
-// MAIN PAGE COMPONENT
+// MAIN PAGE COMPONENT WITH INLINE COMPONENTS
 // ============================================================================
 
 export default function Home() {
@@ -721,104 +110,288 @@ export default function Home() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
+  // Global UI States shared across sub-sections
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSuccess, setTxSuccess] = useState<string | null>(null);
+
+  const [formData, setFormData] = useState<FormState>({
+    freelancerAddress: '',
+    totalAmount: '',
+    projectIdToCancel: '',
+    projectIdToRelease: '',
+    milestoneIndexToRelease: ''
+  });
+
+  const fetchProjects = useCallback(async () => {
+    if (!contract) return;
+    try {
+      const totalProjects = await (contract as any).getTotalProjects();
+      const projectList: Project[] = [];
+
+      for (let i = 0; i < Number(totalProjects); i++) {
+        const projectData = await (contract as any).getProject(i);
+        const [client, freelancer, , totalAmount, releasedAmount, cancelled, milestones] = projectData;
+
+        projectList.push({
+          id: i,
+          client: client as string,
+          freelancer: freelancer as string,
+          totalAmount: formatUnits(totalAmount as bigint, 6),
+          releasedAmount: formatUnits(releasedAmount as bigint, 6),
+          cancelled: cancelled as boolean,
+          milestones: (milestones as Array<{ amount: bigint; released: boolean }>).map((m) => ({
+            amount: formatUnits(m.amount, 6),
+            released: m.released
+          }))
+        });
+      }
+      setProjects(projectList);
+    } catch (err) {
+      console.error('Error fetching projects:', err);
+    }
+  }, [contract]);
+
+  useEffect(() => {
+    if (isWalletConnected) {
+      fetchProjects();
+      const interval = setInterval(fetchProjects, 8000);
+      return () => clearInterval(interval);
+    }
+  }, [isWalletConnected, fetchProjects]);
+
   const handleConnectWallet = async () => {
     setIsConnecting(true);
     setConnectionError(null);
-
     try {
-      const result = await connectWallet();
-
-      if (result) {
-        setWalletAddress(result.address);
-        setProvider(result.provider);
-
-        const contractInstance = new Contract(
-          CONTRACT_ADDRESS,
-          CONTRACT_ABI,
-          result.provider
-        );
-
-        setContract(contractInstance);
-        setIsWalletConnected(true);
+      if (typeof window === 'undefined' || !(window as any).ethereum) {
+        throw new Error('Please install MetaMask or Rabby wallet.');
       }
+      const ethereum = (window as any).ethereum;
+      const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      const browserProvider = new ethers.BrowserProvider(ethereum);
+      const network = await browserProvider.getNetwork();
+
+      if (Number(network.chainId) !== ARC_TESTNET_CHAIN_ID) {
+        await ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: `0x${ARC_TESTNET_CHAIN_ID.toString(16)}` }]
+        });
+      }
+
+      setWalletAddress(accounts);
+      setProvider(browserProvider);
+      setContract(new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, browserProvider));
+      setIsWalletConnected(true);
     } catch (error: any) {
-      setConnectionError(error?.message || 'Failed to connect wallet');
+      setConnectionError(error?.message || 'Connection failed');
     } finally {
       setIsConnecting(false);
     }
   };
 
-  const handleDisconnect = () => {
-    setIsWalletConnected(false);
-    setWalletAddress(null);
-    setProvider(null);
-    setContract(null);
-    setConnectionError(null);
+  const handleCreateProject = async () => {
+    if (!contract || !provider) return;
+    try {
+      setTxLoading(true); setTxError(null); setTxSuccess(null);
+      const totalAmount = parseUnits(formData.totalAmount, 6);
+      const signer = await provider.getSigner();
+      const tx = await (contract.connect(signer) as any).createProject(formData.freelancerAddress, totalAmount);
+      setTxSuccess('Vault configuration processing on-chain...');
+      await tx.wait();
+      setTxSuccess('Secure Milestone Vault deployed successfully!');
+      setFormData(prev => ({ ...prev, freelancerAddress: '', totalAmount: '' }));
+      fetchProjects();
+    } catch (err: any) { setTxError(err?.message || 'Transaction failed'); } finally { setTxLoading(false); }
+  };
+
+  const handleReleaseMilestone = async () => {
+    if (!contract || !provider) return;
+    try {
+      setTxLoading(true); setTxError(null); setTxSuccess(null);
+      const signer = await provider.getSigner();
+      const tx = await (contract.connect(signer) as any).releaseMilestone(formData.projectIdToRelease, formData.milestoneIndexToRelease);
+      setTxSuccess('Releasing escrow allocation...');
+      await tx.wait();
+      setTxSuccess('Milestone payout settled completely!');
+      setFormData(prev => ({ ...prev, projectIdToRelease: '', milestoneIndexToRelease: '' }));
+      fetchProjects();
+    } catch (err: any) { setTxError(err?.message || 'Payout failed'); } finally { setTxLoading(false); }
+  };
+
+  const handleCancelProject = async (id: number) => {
+    if (!contract || !provider) return;
+    try {
+      setTxLoading(true); setTxError(null); setTxSuccess(null);
+      const signer = await provider.getSigner();
+      const tx = await (contract.connect(signer) as any).cancelProject(id);
+      setTxSuccess('Processing early cancellation protocols...');
+      await tx.wait();
+      setTxSuccess('Project terminated. Remaining balance split executed.');
+      fetchProjects();
+    } catch (err: any) { setTxError(err?.message || 'Cancellation failed'); } finally { setTxLoading(false); }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <Navbar
-        isConnected={isWalletConnected}
-        walletAddress={walletAddress}
-        onConnect={handleConnectWallet}
-        onDisconnect={handleDisconnect}
-      />
+    <div className="min-h-screen bg-[#0B0F19] text-[#E2E8F0] font-sans selection:bg-teal-500/30 selection:text-teal-200">
+      {/* GLOW BACKGROUND EFFECT */}
+      <div className="absolute top-0 left-1/4 h-[500px] w-[500px] rounded-full bg-teal-500/5 blur-[120px] pointer-events-none" />
+      <div className="absolute top-1/3 right-1/4 h-[400px] w-[400px] rounded-full bg-blue-500/5 blur-[100px] pointer-events-none" />
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {!isWalletConnected ? (
-          <div className="flex flex-col items-center justify-center py-24">
-            <div className="text-center">
-              <h1 className="mb-4 text-5xl font-bold text-slate-900">ArcMilestone</h1>
-              <p className="mb-8 text-lg text-slate-600">
-                Secure Escrow Protocol for Web3 Professionals
-              </p>
-              {connectionError && (
-                <div className="mb-6 rounded-lg bg-red-100 p-4 text-red-700">
-                  {connectionError}
-                </div>
-              )}
-              <button
-                onClick={handleConnectWallet}
-                disabled={isConnecting}
-                className="rounded-lg bg-blue-600 px-8 py-3 font-semibold text-white transition disabled:bg-slate-400 hover:bg-blue-700"
-              >
-                {isConnecting ? 'Connecting...' : 'Connect Wallet to Get Started'}
-              </button>
+      {/* NAVBAR */}
+      <nav className="sticky top-0 z-50 border-b border-slate-800/60 bg-[#0B0F19]/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-teal-400 to-blue-600 shadow-md shadow-teal-500/20">
+              <Shield className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">ArcMilestone</span>
+              <span className="ml-2 rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-teal-400">Protocol</span>
             </div>
           </div>
+          {isWalletConnected && walletAddress ? (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-[#131B2E] px-4 py-2 font-mono text-xs font-semibold text-slate-300 shadow-inner">
+                <div className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
+                {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              </div>
+              <button onClick={() => setIsWalletConnected(false)} className="rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs font-medium text-red-400 transition hover:bg-red-500/10">Disconnect</button>
+            </div>
+          ) : (
+            <button onClick={handleConnectWallet} className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95 shadow-lg shadow-teal-500/10"><Wallet className="h-4 w-4" /> Connect Wallet</button>
+          )}
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-7xl px-6 py-12">
+        {!isWalletConnected ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <h1 className="text-5xl font-extrabold tracking-tight text-white lg:text-6xl max-w-2xl leading-tight">Secure Payouts.<br /><span className="bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">Build Unbounded Trust.</span></h1>
+            <p className="mt-6 max-w-lg text-base text-slate-400 leading-relaxed">Automate professional freelance agreements on Arc Network. Milestone tracking protection mechanisms with built-in instant client escrow dispute handling.</p>
+            {connectionError && <div className="mt-6 flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400"><AlertCircle className="h-4 w-4" /> {connectionError}</div>}
+            <button onClick={handleConnectWallet} disabled={isConnecting} className="mt-10 flex items-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 via-teal-600 to-blue-600 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-teal-500/10 transition hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50">{isConnecting ? 'Initializing Stack...' : 'Enter App Dashboard'}</button>
+          </div>
         ) : (
-          <>
-            <div className="mb-8 flex gap-2 border-b border-slate-200">
-              <button
-                onClick={() => setActiveTab('client')}
-                className={`px-6 py-3 font-semibold transition-all ${
-                  activeTab === 'client'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Client View
-              </button>
-              <button
-                onClick={() => setActiveTab('freelancer')}
-                className={`px-6 py-3 font-semibold transition-all ${
-                  activeTab === 'freelancer'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Freelancer View
-              </button>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* LEFT INPUT CONTROLS */}
+            <div className="lg:col-span-5 space-y-6">
+              {/* INTERFACE SELECTOR */}
+              <div className="flex p-1 rounded-xl bg-[#111827] border border-slate-800/80">
+                <button onClick={() => setActiveTab('client')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all ${activeTab === 'client' ? 'bg-[#1F2937] text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Client Dashboard</button>
+                <button onClick={() => setActiveTab('freelancer')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all ${activeTab === 'freelancer' ? 'bg-[#1F2937] text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Freelancer Hub</button>
+              </div>
+
+              {/* ACTION TRANSACTION RESPONSES */}
+              {(txError || txSuccess) && (
+                <div className={`p-4 rounded-xl border text-sm flex items-start gap-3 ${txError ? 'bg-red-500/5 border-red-500/20 text-red-400' : 'bg-teal-500/5 border-teal-500/20 text-teal-400'}`}>
+                  {txError ? <XCircle className="h-5 w-5 mt-0.5 shrink-0" /> : <CheckCircle2 className="h-5 w-5 mt-0.5 shrink-0" />}
+                  <div>{txError || txSuccess}</div>
+                </div>
+              )}
+
+              {/* DYNAMIC FORM VIEWS */}
+              {activeTab === 'client' ? (
+                <div className="rounded-2xl border border-slate-800/80 bg-[#111827]/50 p-6 backdrop-blur-sm shadow-xl">
+                  <div className="flex items-center gap-2 mb-6"><FileText className="h-5 w-5 text-teal-400" /><h2 className="text-lg font-bold text-white">Deploy Secure Escrow</h2></div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-semibold tracking-wider uppercase text-slate-400">Freelancer Account Address</label>
+                      <input type="text" placeholder="0x..." value={formData.freelancerAddress} onChange={(e) => setFormData({ ...formData, freelancerAddress: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-800 bg-[#090D16] px-4 py-3 font-mono text-sm text-white placeholder-slate-600 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold tracking-wider uppercase text-slate-400">Total Project Allocation (USDC)</label>
+                      <input type="number" placeholder="0.00" value={formData.totalAmount} onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-800 bg-[#090D16] px-4 py-3 text-sm text-white placeholder-slate-600 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500" />
+                    </div>
+                    <div className="pt-2">
+                      <div className="rounded-xl bg-[#1F2937]/30 border border-slate-800/50 p-3 mb-4 text-xs text-slate-400 leading-normal">Funds will automatically split into 3 locked release milestones:<br /><span className="text-teal-400 font-medium">M1: 30% • M2: 40% • M3: 30%</span></div>
+                      <button onClick={handleCreateProject} disabled={txLoading} className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-teal-500/10 transition hover:opacity-95 disabled:opacity-40">{txLoading ? 'Signing Protocol...' : 'Initialize Contract Vault'}</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-800/80 bg-[#111827]/50 p-6 backdrop-blur-sm shadow-xl">
+                  <div className="flex items-center gap-2 mb-6"><Layers className="h-5 w-5 text-blue-400" /><h2 className="text-lg font-bold text-white">Settle Active Payouts</h2></div>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold tracking-wider uppercase text-slate-400">Project Index ID</label>
+                        <input type="number" placeholder="0" value={formData.projectIdToRelease} onChange={(e) => setFormData({ ...formData, projectIdToRelease: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-800 bg-[#090D16] px-4 py-3 text-sm text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold tracking-wider uppercase text-slate-400">Milestone Index</label>
+                        <input type="number" placeholder="0 - 2" min="0" max="2" value={formData.milestoneIndexToRelease} onChange={(e) => setFormData({ ...formData, milestoneIndexToRelease: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-800 bg-[#090D16] px-4 py-3 text-sm text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      </div>
+                    </div>
+                    <button onClick={handleReleaseMilestone} disabled={txLoading} className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-500/10 transition hover:opacity-95 disabled:opacity-40">{txLoading ? 'Releasing Funds...' : 'Execute Milestone Release'}</button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {activeTab === 'client' && (
-              <ClientView walletAddress={walletAddress || ''} provider={provider} contract={contract} />
-            )}
-            {activeTab === 'freelancer' && (
-              <FreelancerView walletAddress={walletAddress || ''} provider={provider} contract={contract} />
-            )}
-          </>
+            {/* RIGHT SIDE DATA DISPLAY */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="flex items-center justify-between"><h2 className="text-xl font-bold tracking-tight text-white">Active Ledger Protocols</h2><span className="text-xs text-slate-500 font-medium font-mono">Live Sync Engine Enabled</span></div>
+
+              {projects.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 p-12 text-center text-slate-500"><Layers className="h-8 w-8 mx-auto stroke-[1.5] text-slate-600 mb-3" /> No network projects active on this wallet address yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {projects.map((project) => {
+                    const isClient = project.client.toLowerCase() === walletAddress?.toLowerCase();
+                    const isFreelancer = project.freelancer.toLowerCase() === walletAddress?.toLowerCase();
+                    if (!isClient && !isFreelancer) return null;
+
+                    return (
+                      <div key={project.id} className={`rounded-2xl border bg-[#111827]/30 p-5 backdrop-blur-sm transition shadow-md ${project.cancelled ? 'border-red-500/20 opacity-60' : 'border-slate-800/80 hover:border-slate-700/80'}`}>
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-white font-mono">Project Ledger #{project.id}</span>
+                              {project.cancelled && <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-red-400">Terminated</span>}
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+                              <span className="font-mono">Client: {project.client.slice(0,4)}...{project.client.slice(-4)}</span>
+                              <ArrowRight className="h-3 w-3 text-slate-600" />
+                              <span className="font-mono">Freelancer: {project.freelancer.slice(0,4)}...{project.freelancer.slice(-4)}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-slate-400">Total Secured</div>
+                            <div className="text-base font-extrabold text-white font-mono mt-0.5">${project.totalAmount} <span className="text-[10px] text-slate-400 font-normal">USDC</span></div>
+                          </div>
+                        </div>
+
+                        {/* MILESTONE PILLS TRACKER */}
+                        <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800/40">
+                          {project.milestones.map((m, idx) => (
+                            <div key={idx} className={`rounded-xl border p-3 flex flex-col justify-between ${m.released ? 'bg-teal-500/5 border-teal-500/20' : 'bg-[#090D16]/60 border-slate-800/60'}`}>
+                              <div>
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Milestone {idx + 1}</div>
+                                <div className="text-xs font-bold text-white font-mono mt-1">${m.amount}</div>
+                              </div>
+                              <div className="mt-2.5 flex items-center gap-1.5">
+                                <div className={`h-1.5 w-1.5 rounded-full ${m.released ? 'bg-teal-400' : 'bg-slate-600'}`} />
+                                <span className={`text-[10px] font-semibold ${m.released ? 'text-teal-400' : 'text-slate-500'}`}>{m.released ? 'Settled' : 'Escrowed'}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* CLIENT CANCELLATION TRIGGER ACTION */}
+                        {isClient && !project.cancelled && Number(project.releasedAmount) < Number(project.totalAmount) && (
+                          <div className="mt-4 flex justify-end">
+                            <button onClick={() => handleCancelProject(project.id)} disabled={txLoading} className="text-xs font-medium text-red-400 border border-red-500/10 bg-red-500/5 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition">Cancel Protocol (10% Security Fee)</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </main>
     </div>
